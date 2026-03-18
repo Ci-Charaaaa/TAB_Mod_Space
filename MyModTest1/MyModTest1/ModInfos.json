@@ -1,7 +1,7 @@
 {
   "Id": "com.charaa.test1",
   "Name": "测试用",
-  "Version": "0.0.0",
+  "Version": "0.0.1",
   "Author": "charaa",
   "Description": "测试一下如何开发mod，目前第一版完成，另：游戏内配置均需要重启后生效",
   "IsCampaign": false,
