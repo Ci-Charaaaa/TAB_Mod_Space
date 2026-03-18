@@ -47,7 +47,7 @@ namespace MyModTest1
             {
                 
                 // 寻找目标资源文件
-                string sourceDir = Path.Combine(test_mod.ModPath, "ZXRules",file_name);
+                string sourceDir = Path.Combine(test_mod.ModPath, "ZX",file_name);
                 //寻找目标拷贝目录
                 string targetDir = Path.Combine(test_mod.ModPath,file_name);
 
