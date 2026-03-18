@@ -8,6 +8,10 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
+using DXVision;
+using AX.ModLoader;
+using AX.ModLoader.Config;
+using System.Runtime.CompilerServices;
 
 
 namespace MyModTest1
@@ -109,7 +113,7 @@ namespace MyModTest1
                 DeleteFiles("ZXRules.dat", "游侠增强");
             }
 
-                DXLog.Write($"[Test_Mod] 配置已更改！启用功能 更强的游侠: {test_config.EnableFeature1}");
+            DXLog.Write($"[Test_Mod] 配置已更改！启用功能 更强的游侠: {test_config.EnableFeature1}");
             
         }
 
