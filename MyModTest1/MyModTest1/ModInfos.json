@@ -1,0 +1,17 @@
+{
+  "Id": "com.charaa.test1",
+  "Name": "测试用",
+  "Version": "0.0.0",
+  "Author": "charaa",
+  "Description": "测试一下如何开发mod，以及游戏内配置均需要重启后生效",
+  "IsCampaign": false,
+  "IsGlobalEnabled": true,
+  "Dependencies": [],
+  "ConflictsWith": [],
+  "Priority": 0,
+  "Enabled": true,
+  "RequiredModLoaderVersion": "1.1.1",
+  "RepositoryUrl": "",
+  "AllowAutoUpdate": false,
+  "ShowInCustomLevels": true
+}
