@@ -8,10 +8,6 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
-using DXVision;
-using AX.ModLoader;
-using AX.ModLoader.Config;
-using System.Runtime.CompilerServices;
 
 
 namespace MyModTest1
@@ -33,7 +29,13 @@ namespace MyModTest1
             {
                 DXLog.Write($"[Test_Mod] 游侠增强功能 已启用！");
                 //目前功能就是把ZXRules.dat放到mod目录下覆盖原文件，后续可以增加更多功能
-                CopyFiles("ZXRules.dat","游侠增强");
+                CopyFiles("youxia.dat","游侠增强");
+            }
+            else
+            {
+                DXLog.Write($"[Test_Mod] 游侠增强功能 已禁用！");
+                CopyFiles("original.dat","恢复原版");
+                //DeleteFiles("ZXRules.dat","游侠增强");
             }
 
             test_config.OnConfigChanged += OnConfigChanged;
@@ -49,7 +51,7 @@ namespace MyModTest1
                 // 寻找目标资源文件
                 string sourceDir = Path.Combine(test_mod.ModPath, "ZX",file_name);
                 //寻找目标拷贝目录
-                string targetDir = Path.Combine(test_mod.ModPath,file_name);
+                string targetDir = Path.Combine(test_mod.ModPath,"ZXRules.dat");
 
                 if (!File.Exists(sourceDir))
                 {
@@ -79,7 +81,7 @@ namespace MyModTest1
             }
         }
 
-        private void DeleteFiles(string file_name,string event_name)
+        /*private void DeleteFiles(string file_name,string event_name)
         {
             try
             {
@@ -99,18 +101,18 @@ namespace MyModTest1
             {
                 DXLog.Write($"[Test_Mod] 文件删除失败: {ex.Message}");
             }
-        }
+        }*/
 
         private void OnConfigChanged(ModConfig config)
         {
             //对于配置更改后的判断
             if (test_config.EnableFeature1)
             {
-                CopyFiles("ZXRules.dat", "游侠增强");
+                CopyFiles("youxia.dat", "游侠增强");
             }
             else
             {
-                DeleteFiles("ZXRules.dat", "游侠增强");
+                CopyFiles("original.dat", "恢复原版");
             }
 
             DXLog.Write($"[Test_Mod] 配置已更改！启用功能 更强的游侠: {test_config.EnableFeature1}");
