@@ -47,14 +47,14 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="MyModTest1\MyModTest1.cs" />
+    <Compile Include="ranger_boost\ranger_boost.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="MyModTest1\ModInfos.json" />
+    <None Include="ranger_boost\ModInfos.json" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="MyModTest1\ZXRules\" />
+    <Folder Include="ranger_boost\ZXRules\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
