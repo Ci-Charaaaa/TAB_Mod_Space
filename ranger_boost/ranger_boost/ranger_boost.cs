@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 
-namespace MyModTest1
+namespace ranger_boost
 {
     public class Test_Mod : IModEntry 
     {
