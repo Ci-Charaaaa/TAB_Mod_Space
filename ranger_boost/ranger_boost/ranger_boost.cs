@@ -5,9 +5,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
+using ZX;
+using HarmonyLib;
 
 
 namespace ranger_boost
@@ -16,6 +19,7 @@ namespace ranger_boost
     {
         private Mod test_mod;
         private Test_Mod_config test_config;
+ 
 
         public override void OnLoad(Mod mod)
         {
@@ -38,10 +42,74 @@ namespace ranger_boost
                 //DeleteFiles("ZXRules.dat","游侠增强");
             }
 
+            var harmony = new Harmony("com.charaa.test1");
+            harmony.PatchAll(Assembly.GetExecutingAssembly()); // 告诉 Harmony 扫描这个项目里的 [HarmonyPatch]
             test_config.OnConfigChanged += OnConfigChanged;
+            Console.WriteLine("[StatModifierMod] Mod已初始化，等待数据加载...");
 
-                
         }
+
+        // 钩住 ApplyMods
+        [HarmonyPatch(typeof(ZXDefaultParams), "ApplyMods")]
+        public class InjectionPatch
+        {
+            // 使用 Postfix，确保在游戏逻辑跑完后，执行强行覆盖
+            public static void Postfix()
+            {
+                DXLog.Write("[StatModifierMod] 检测到关卡数据初始化，开始执行强行注入...");
+                ApplyMemoryPatches();
+            }
+        }
+
+        public static void ApplyMemoryPatches()
+        {
+            var allParams = ZXDefaultParams.get_All();
+            if (allParams == null) return;
+
+            foreach (var p in allParams)
+            {
+                // 确保 ID 匹配
+                if (p.ID == "Ranger")
+                {
+                    if (p is ZXEntityDefaultParams entityParams)
+                    {
+                        try
+                        {
+                            // 获取生命值字段
+                            FieldInfo lifeField = entityParams.GetType().GetField("_Life", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+                            if (lifeField != null)
+                            {
+                                // --- 关键修正：去掉 f，改用整数 100 ---
+                                // 既然日志显示原数值是 80 (Int32)，我们必须给它 Int32
+                                int newLifeValue = 100;
+                                lifeField.SetValue(entityParams, newLifeValue);
+
+                                // 同步修改 DefaultValues 里的字段
+                                if (entityParams.DefaultValues != null)
+                                {
+                                    FieldInfo defLifeField = entityParams.DefaultValues.GetType().GetField("_Life", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                                    if (defLifeField != null)
+                                    {
+                                        defLifeField.SetValue(entityParams.DefaultValues, newLifeValue);
+                                    }
+                                }
+
+                                DXLog.Write($"[StatModifierMod] 成功！Ranger 生命已强行锁定为: {newLifeValue}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            DXLog.Write($"[StatModifierMod] 注入失败: {ex.Message}");
+                        }
+                    }
+                    break;
+                }
+            }
+
+        }
+
+
 
         private void CopyFiles(string file_name,string event_name)
         {
