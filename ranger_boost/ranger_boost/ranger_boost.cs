@@ -19,8 +19,8 @@ namespace ranger_boost
     {
         private Mod test_mod;
         private Test_Mod_config test_config;
-        public static int newLifeValue;
-        private static FieldInfo _lifeField;
+        //public static int newLifeValue;
+        //private static FieldInfo _lifeField;
         public static Ranger_Mod Instance;
 
 
@@ -30,17 +30,9 @@ namespace ranger_boost
 
             DXLog.Write($"[Test_Mod] 已加载！版本：{mod.Info.Version} gugugaga!");
 
-            //清理旧指针和缓存，确保反射字段在第一次使用时正确获取
-            _lifeField = null;
-
             test_config = mod.RegisterConfig<Test_Mod_config>();
 
             Instance = this;
-
-
-            newLifeValue = (int)((test_config.HealthyMult/100) * 60 );
-            DXLog.Write($"[Test_Mod] 游侠生命值修改 已启用！");
-
 
             var harmony = new Harmony("com.charaa.test1");
             harmony.UnpatchAll("com.charaa.test1");
@@ -102,8 +94,6 @@ namespace ranger_boost
                         SetFieldSafe(ep, "_Armor", (float)config.ArmorAdd, 0.01);
 
                         DXLog.Write($"[Test_Mod] <<< 实体 {p.ID} 属性注入尝试完成。");
-
-
 
                         try
                         {
@@ -248,19 +238,15 @@ namespace ranger_boost
         }*/
 
 
-
         private void OnConfigChanged(ModConfig config)
         {
             //对于配置更改后的加载
-            
-            newLifeValue = (int)((test_config.HealthyMult / 100) * 60);
             test_mod.SaveConfig();
 
             DXLog.Write($"[Test_Mod] 配置已更改！启用功能 更强的游侠: {test_config.HealthyMult}");
             
         }
 
-        
 
         private void Unload()
         {
@@ -270,7 +256,6 @@ namespace ranger_boost
 
 
     }
-    
     public class Test_Mod_config : ModConfig
     {
 
