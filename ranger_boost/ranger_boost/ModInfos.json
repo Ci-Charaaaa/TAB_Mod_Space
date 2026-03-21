@@ -1,9 +1,9 @@
 {
   "Id": "com.charaa.test1",
-  "Name": "测试用",
-  "Version": "0.0.2",
+  "Name": "游侠增强",
+  "Version": "0.0.3",
   "Author": "charaa",
-  "Description": "测试一下如何开发mod，目前第一版完成，另：游戏内配置均需要重启后生效",
+  "Description": "测试一下如何开发mod，目前第三版完成，主要功能就是修改游侠的各项属性",
   "IsCampaign": false,
   "IsGlobalEnabled": true,
   "Dependencies": [],
