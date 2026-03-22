@@ -1,9 +1,9 @@
 {
   "Id": "com.charaa.test1",
-  "Name": "游侠增强",
+  "Name": "实体增强",
   "Version": "0.0.5",
   "Author": "charaa",
-  "Description": "测试一下如何开发mod，目前第三版完成，主要功能就是修改游侠的各项属性",
+  "Description": "主要功能是在游戏内修改实体的各项属性,目前支持士兵与游侠",
   "IsCampaign": false,
   "IsGlobalEnabled": true,
   "Dependencies": [],
