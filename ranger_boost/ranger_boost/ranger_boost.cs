@@ -15,13 +15,14 @@ using HarmonyLib;
 
 namespace ranger_boost
 {
-    public class Ranger_Mod : IModEntry 
+    public class Boost_Mod : IModEntry 
     {
         private Mod test_mod;
-        private Test_Mod_config test_config;
-        //public static int newLifeValue;
-        //private static FieldInfo _lifeField;
-        public static Ranger_Mod Instance;
+
+        public Unit_Mod_config ranger_config;
+        public Unit_Mod_config soldier_config;
+
+        public static Boost_Mod Instance;
 
 
         public override void OnLoad(Mod mod)
@@ -30,7 +31,8 @@ namespace ranger_boost
 
             DXLog.Write($"[Test_Mod] 已加载！版本：{mod.Info.Version} gugugaga!");
 
-            test_config = mod.RegisterConfig<Test_Mod_config>();
+            ranger_config = mod.RegisterConfig<Ranger_Mod_config>();
+            soldier_config = mod.RegisterConfig<Soldier_Mod_config>();
 
             Instance = this;
 
@@ -40,7 +42,8 @@ namespace ranger_boost
 
             DXLog.Write($"[Test_Mod] Harmony 补丁已应用！正在等待游戏逻辑初始化...,随时准备进行属性加强模块注入");
 
-            test_config.OnConfigChanged += OnConfigChanged;
+            ranger_config.OnConfigChanged += OnConfigChanged;
+            soldier_config.OnConfigChanged += OnConfigChanged;
 
         }
 
@@ -48,89 +51,73 @@ namespace ranger_boost
         [HarmonyPatch(typeof(ZXDefaultParams), "ApplyMods")]
         public class InjectionPatch
         {
-            // 使用 Postfix，确保在游戏逻辑跑完后，执行强行覆盖
             public static void Postfix()
             {
-                DXLog.Write("[StatModifierMod] 检测到关卡数据初始化，开始执行强行注入...");
-                ApplyMemoryPatches();
+                if (Instance == null) return;
+
+                DXLog.Write("[Test_Mod] 开始执行多单位属性强行注入...");
+
+                // 调用通用方法：传入不同的 ID、对应的 Config 实例、以及该兵种的原始数值
+                ApplyUnitStats("Ranger", Instance.ranger_config, 60f, 4f, 6f, 8f);
+                ApplyUnitStats("Soldier", Instance.soldier_config, 120f, 2.4f, 5f, 6f);
             }
         }
 
-        public static void ApplyMemoryPatches()
+        //核心注入方法：根据实体ID扫描并修改属性
+        // 核心注入方法：传入 ID、配置对象以及基础属性参考值
+        public static void ApplyUnitStats(string entity_ID, Unit_Mod_config config, float baseLife, float baseSpeed, float baseRange, float baseVision)
         {
-            // 1. 检查单例和配置是否就绪
-            if (Ranger_Mod.Instance == null || Ranger_Mod.Instance.test_config == null)
-            {
-                DXLog.Write("[Test_Mod] [ERROR] 注入终止：Ranger_Mod.Instance 或配置对象为空！");
-                return;
-            }
-
-            var config = Ranger_Mod.Instance.test_config;
             var allParams = ZXDefaultParams.get_All();
-
-            if (allParams == null)
-            {
-                DXLog.Write("[Test_Mod] [WARNING] ZXDefaultParams.get_All() 返回为空，可能尚未进入加载流程。");
-                return;
-            }
-
-            DXLog.Write($"[Test_Mod] 开始扫描实体参数，总数: {allParams.Count}");
+            if (allParams == null) return;
 
             foreach (var p in allParams)
             {
-                if (p.ID == "Ranger" && p is ZXEntityDefaultParams ep)
+                // 匹配 ID 并且确保是实体参数类
+                if (p.ID == entity_ID && p is ZXEntityDefaultParams ep)
                 {
-                    DXLog.Write($"[Test_Mod] >>> 找到目标实体: {p.ID}，开始注入属性...");
-
+                    DXLog.Write($"[Test_Mod] >>> 正在注入实体: {p.ID}");
 
                     try
                     {
-                        // 参数说明：目标对象, 字段名, 原始基础值, 放大倍率(0-5.0)
-                        SetFieldSafe(ep, "_Life", 60f, config.HealthyMult / 100.0);
-                        SetFieldSafe(ep, "_RunSpeed", 4f, config.SpeedMult / 100.0);
-                        SetFieldSafe(ep, "_WatchRange", 8f, config.VisionMult / 100.0);
+                        // 1. 基础属性注入 (Life, Speed, Vision, Armor)
+                        SetFieldSafe(ep, "_Life", baseLife, config.HealthyMult / 100.0);
+                        SetFieldSafe(ep, "_RunSpeed", baseSpeed, config.SpeedMult / 100.0);
+                        SetFieldSafe(ep, "_WatchRange", baseVision, config.VisionMult / 100.0);
+                        SetFieldSafe(ep, "_Armor", (float)config.ArmorAdd, 1.0); // 护甲通常是直接加法
 
-                        // 护甲通常是直接相加，所以倍率传1.0
-                        SetFieldSafe(ep, "_Armor", (float)config.ArmorAdd, 0.01);
+                        // 2. 战斗属性注入 (Damage, Range, Speed)
+                        FieldInfo shellField = typeof(ZXEntityDefaultParams).GetField("_AttackCommandBasic", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                        object shellObj = shellField?.GetValue(ep);
 
-                        DXLog.Write($"[Test_Mod] <<< 实体 {p.ID} 属性注入尝试完成。");
-
-                        try
+                        if (shellObj != null)
                         {
-                            FieldInfo shellField = typeof(ZXEntityDefaultParams).GetField("_AttackCommandBasic", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                            object shellObj = shellField?.GetValue(ep);
+                            FieldInfo paramsField = shellObj.GetType().GetField("_Params", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                            object realParams = paramsField?.GetValue(shellObj);
 
-                            if (shellObj != null)
+                            if (realParams != null)
                             {
-                                FieldInfo paramsField = shellObj.GetType().GetField("_Params", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                                object realParams = paramsField?.GetValue(shellObj);
+                                // 伤害
+                                UpdateIntField(realParams, "_Damage", (int)10, config.DamageMult / 100.0);
+                                // 射程
+                                UpdateFloatField(realParams, "_ActionRange", baseRange, config.RangeMult / 100.0);
+                                // 攻击速度
+                                UpdateIntField(realParams, "_TimeAction", 1, config.DamageSpeedMult / 1.0);
 
-                                if (realParams != null)
-                                {
-                                    
-                                    UpdateIntField(realParams, "_Damage", 10, config.DamageMult / 100.0);
-                                    UpdateIntField(realParams, "_TimeAction", 1, config.DamageMult / 1.0);
-                                    UpdateFloatField(realParams, "_ActionRange", 6f, config.RangeMult / 100.0);
-
-                                    DXLog.Write("[Test_Mod] [SUCCESS] 游侠战斗属性注入完成！");
-                                }
+                                DXLog.Write($"[Test_Mod] [SUCCESS] {p.ID} 战斗属性注入完成！");
                             }
                         }
-                        catch (Exception ex)
-                        {
-                            DXLog.Write($"[Test_Mod] [ERROR] 攻击层注入失败: {ex.Message}");
-                        }
-
                     }
                     catch (Exception ex)
                     {
-                        DXLog.Write($"[Test_Mod] [FATAL] 注入循环崩溃: {ex.Message}\n{ex.StackTrace}");
+                        DXLog.Write($"[Test_Mod] [ERROR] {entity_ID} 注入过程中崩溃: {ex.Message}");
                     }
-                    break; // 找到 Ranger 后跳出循环
+                    // 找到目标后就不再继续扫这个实体的循环了
+                    break;
                 }
             }
         }
 
+        //处理整数和浮点数字段的通用方法，带日志输出
         private static void UpdateIntField(object target, string fieldName, int baseVal, double mult)
         {
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
@@ -141,7 +128,6 @@ namespace ranger_boost
                 DXLog.Write($"[Test_Mod] [OK] {fieldName} (Int32) -> {final}");
             }
         }
-
         private static void UpdateFloatField(object target, string fieldName, float baseVal, double mult)
         {
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
@@ -171,7 +157,7 @@ namespace ranger_boost
                 // 2. 计算并转换
                 double rawCalculated = baseValue * multiplier;
 
-                // 根据字段的实际类型进行转换（游戏里有些是 int，有些是 float）
+                // 根据字段的实际类型进行转换
                 object finalValue;
                 if (field.FieldType == typeof(float))
                 {
@@ -185,7 +171,7 @@ namespace ranger_boost
                 // 3. 执行注入
                 field.SetValue(target, finalValue);
 
-                // 4. 同步修改 DefaultValues (这是很多 Mod 失效的原因)
+                // 4. 同步修改 DefaultValues 
                 if (target.DefaultValues != null)
                 {
                     field.SetValue(target.DefaultValues, finalValue);
@@ -243,74 +229,134 @@ namespace ranger_boost
             //对于配置更改后的加载
             test_mod.SaveConfig();
 
-            DXLog.Write($"[Test_Mod] 配置已更改！启用功能 更强的游侠: {test_config.HealthyMult}");
+            DXLog.Write($"[Test_Mod] 配置已更改！启用功能 更强的游侠: {ranger_config.HealthyMult}");
             
         }
 
 
         private void Unload()
         {
-            test_config.OnConfigChanged -= OnConfigChanged;
+            ranger_config.OnConfigChanged -= OnConfigChanged;
+            soldier_config.OnConfigChanged -= OnConfigChanged;
             test_mod.SaveConfig();
         }
 
 
     }
-    public class Test_Mod_config : ModConfig
-    {
 
+    public abstract class Unit_Mod_config : ModConfig
+    {
+        public abstract double HealthyMult { get; set; }
+        public abstract double DamageMult { get; set; }
+        public abstract double RangeMult { get; set; }
+        public abstract double DamageSpeedMult { get; set; }
+        public abstract double SpeedMult { get; set; }
+        public abstract double ArmorAdd { get; set; }
+        public abstract double VisionMult { get; set; }
+
+    }
+    public class Ranger_Mod_config : Unit_Mod_config
+
+    {
+        //游侠属性调整
         [ConfigOption("游侠生命", ConfigOptionType.Slider,
         Description = "调整游侠生命值,不能小于0，最大500%",
         Category = "游戏性",
-        Order = 2)]
+        Order = 1)]
         [Range(1, 500, 1)]
-        public double HealthyMult { get; set; } = 100;
+        public override double HealthyMult { get; set; } = 100;
 
         [ConfigOption("攻击倍率", ConfigOptionType.Slider, 
             Description = "调整游侠攻击", 
             Category = "游侠属性", 
             Order = 2)]
         [Range(1, 300, 1)]
-        public double DamageMult { get; set; } = 100;
+        public override double DamageMult { get; set; } = 100;
 
         [ConfigOption("攻击范围", ConfigOptionType.Slider,
             Description = "调整游侠攻击范围",
             Category = "游侠属性",
-            Order = 2)]
+            Order = 3)]
         [Range(1, 200, 1)]
-        public double RangeMult { get; set; } = 100;
+        public override double RangeMult { get; set; } = 100;
 
         [ConfigOption("攻击速度", ConfigOptionType.Slider,
             Description = "调整游侠攻击速度",
             Category = "游侠属性",
-            Order = 2)]
+            Order = 4)]
         [Range(1, 300, 1)]
-        public double DamageSpeedMult { get; set; } = 100;
+        public override double DamageSpeedMult { get; set; } = 100;
 
         [ConfigOption("移动速度", ConfigOptionType.Slider, 
             Description = "调整游侠移动速度", 
             Category = "游侠属性", 
-            Order = 3)]
+            Order = 5)]
         [Range(1, 200, 1)]
-        public double SpeedMult { get; set; } = 100;
+        public override double SpeedMult { get; set; } = 100;
 
         [ConfigOption("护甲值", ConfigOptionType.Slider, 
             Description = "调整游侠护甲", 
             Category = "游侠属性", 
-            Order = 4)]
+            Order = 6)]
         [Range(0, 50, 1)]
-        public double ArmorAdd { get; set; } = 0;
+        public override double ArmorAdd { get; set; } = 0;
 
         [ConfigOption("视野倍率", ConfigOptionType.Slider, 
             Description = "调整游侠视野", 
             Category = "游侠属性", 
+            Order = 7)]
+        [Range(1, 200, 1)]
+        public override double VisionMult { get; set; } = 100;
+
+    }
+
+    public class Soldier_Mod_config : Unit_Mod_config
+    {
+        //士兵属性调整
+        [ConfigOption("士兵生命", ConfigOptionType.Slider,
+        Description = "调整士兵生命值,不能小于0，最大500%",
+        Category = "游戏性",
+        Order = 1)]
+        [Range(1, 500, 1)]
+        public override double HealthyMult { get; set; } = 100;
+        [ConfigOption("攻击倍率", ConfigOptionType.Slider,
+            Description = "调整士兵攻击",
+            Category = "士兵属性",
+            Order = 2)]
+        [Range(1, 300, 1)]
+        public override double DamageMult { get; set; } = 100;
+        [ConfigOption("攻击范围", ConfigOptionType.Slider,
+            Description = "调整士兵攻击范围",
+            Category = "士兵属性",
+            Order = 3)]
+        [Range(1, 200, 1)]
+        public override double RangeMult { get; set; } = 100;
+        [ConfigOption("攻击速度", ConfigOptionType.Slider,
+            Description = "调整士兵攻击速度",
+            Category = "士兵属性",
+            Order = 4)]
+        [Range(1, 300, 1)]
+        public override double DamageSpeedMult { get; set; } = 100;
+        [ConfigOption("移动速度", ConfigOptionType.Slider,
+            Description = "调整士兵移动速度",
+            Category = "士兵属性",
             Order = 5)]
         [Range(1, 200, 1)]
-        public double VisionMult { get; set; } = 100;
+        public override double SpeedMult { get; set; } = 100;
 
+        [ConfigOption("护甲值", ConfigOptionType.Slider,
+        Description = "调整士兵护甲",
+        Category = "士兵属性",
+        Order = 6)]
+        [Range(0, 95, 1)]
+        public override double ArmorAdd { get; set; } = 0;
 
-
-
+        [ConfigOption("视野倍率", ConfigOptionType.Slider,
+        Description = "调整士兵视野",
+        Category = "士兵属性",
+        Order = 7)]
+        [Range(1, 200, 1)]
+        public override double VisionMult { get; set; } = 100;
     }
 
 }
