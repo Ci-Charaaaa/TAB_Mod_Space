@@ -80,80 +80,88 @@ namespace ranger_boost
                 {
                     try
                     {
-                        // 1. 基础属性注入
+                        DXLog.Write($"\n[Test_Mod] >>> 开始注入单位: {entity_ID} (Instance: {ep.GetHashCode()})");
 
-                        // 生命
+                        // 1. 基础属性注入 (内部已含 DefaultValues 同步)
                         _setFieldSafe(ep, "_Life", bLife, mLife / 100.0);
-
-                        // 移速
                         _setFieldSafe(ep, "_RunSpeed", bSpeed, mSpeed / 100.0);
-
-                        // 视野
                         _setFieldSafe(ep, "_WatchRange", bVision, mVision / 100.0);
 
-                        // 护甲
+                        // 2. 护甲特殊处理
                         FieldInfo armorField = typeof(ZXEntityDefaultParams).GetField("_Armor", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
                         if (armorField != null)
                         {
                             float armorVal = (float)aArmor;
                             armorField.SetValue(ep, armorVal);
-                            // 必须同步到 UI 使用的 DefaultValues
                             if (ep.DefaultValues != null) armorField.SetValue(ep.DefaultValues, armorVal);
-                            DXLog.Write($"[Test_Mod] [OK] _Armor -> {armorVal}");
+                            DXLog.Write($"[Test_Mod] [Armor] {entity_ID} -> {armorVal} (DefaultValues已同步)");
                         }
 
-                        // 2. 战斗属性注入
+                        // 3. 战斗属性注入 (深入 AttackCommand 内部)
                         FieldInfo shellField = typeof(ZXEntityDefaultParams).GetField("_AttackCommandBasic", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
                         object shellObj = shellField?.GetValue(ep);
 
                         if (shellObj != null)
                         {
-                            FieldInfo paramsField = shellObj.GetType().GetField("_Params", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                            object realParams = paramsField?.GetValue(shellObj);
+                            // 修改当前实体的攻击参数
+                            _processCommandParams(shellObj, "Instance", bDamage, mDamage, bRange, mRange, bTimeAction, mAtkSpeed);
 
-                            if (realParams != null)
+                            
+                            if (ep.DefaultValues is ZXEntityDefaultParams dep)
                             {
-                                _updateIntField(realParams, "_Damage", bDamage, mDamage / 100.0);
-                                _updateFloatField(realParams, "_ActionRange", bRange, mRange / 100.0);
-
-                                // 攻速计算
-                                double speedFactor = mAtkSpeed / 100.0;
-                                if (speedFactor < 0.1) speedFactor = 0.1;
-                                int finalInterval = (int)Math.Max(1, bTimeAction / speedFactor);
-
-                                FieldInfo timeField = realParams.GetType().GetField("_TimeAction", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                                timeField?.SetValue(realParams, finalInterval);
+                                object dShellObj = shellField?.GetValue(dep);
+                                if (dShellObj != null)
+                                {
+                                    DXLog.Write($"[Test_Mod] [Command] 正在同步 {entity_ID} 的 DefaultValues 攻击参数...");
+                                    _processCommandParams(dShellObj, "DefaultValues", bDamage, mDamage, bRange, mRange, bTimeAction, mAtkSpeed);
+                                }
                             }
                         }
-                        DXLog.Write($"[Test_Mod] [SUCCESS] {entity_ID} 注入完成并同步 UI 数据");
+                        DXLog.Write($"[Test_Mod] <<< {entity_ID} 注入流程结束\n");
                     }
                     catch (Exception ex)
                     {
-                        DXLog.Write($"[Test_Mod] [FATAL] {entity_ID} 注入失败: {ex.Message}");
+                        DXLog.Write($"[Test_Mod] [FATAL] {entity_ID} 注入崩溃: {ex.StackTrace}");
                     }
                 }
             }
         }
 
-        //处理整数和浮点数字段的通用方法，带日志输出
-        private static void _updateIntField(object target, string fieldName, int baseVal, double mult)
+        
+        // 增加了 string label 参数，用于日志区分，和排查日志
+        private static void _updateIntField(object target, string fieldName, int baseVal, double mult, string label)
         {
+            if (target == null) return;
+
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             if (field != null)
             {
                 int final = (int)(baseVal * mult);
                 field.SetValue(target, final);
-                DXLog.Write($"[Test_Mod] [OK] {fieldName} (Int32) -> {final}");
+                // 在日志中输出 label (例如 "Instance" 或 "DefaultValues")
+                DXLog.Write($"[Test_Mod] [{label}] {fieldName} (Int32) -> {final}");
+            }
+            else
+            {
+                DXLog.Write($"[Test_Mod] [ERROR] [{label}] 找不到字段: {fieldName}");
             }
         }
-        private static void _updateFloatField(object target, string fieldName, float baseVal, double mult)
+
+        private static void _updateFloatField(object target, string fieldName, float baseVal, double mult, string label)
         {
+            if (target == null) return;
+
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             if (field != null)
             {
                 float final = (float)(baseVal * mult);
                 field.SetValue(target, final);
-                DXLog.Write($"[Test_Mod] [OK] {fieldName} (Single) -> {final}");
+                // 在日志中输出 label
+                DXLog.Write($"[Test_Mod] [{label}] {fieldName} (Single) -> {final}");
+            }
+            else
+            {
+                DXLog.Write($"[Test_Mod] [ERROR] [{label}] 找不到字段: {fieldName}");
             }
         }
 
@@ -162,44 +170,59 @@ namespace ranger_boost
         {
             try
             {
-                // 1. 获取字段信息
-                FieldInfo field = typeof(ZXEntityDefaultParams).GetField(fieldName,
-                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                FieldInfo field = typeof(ZXEntityDefaultParams).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (field == null) return;
 
-                if (field == null)
-                {
-                    DXLog.Write($"[Test_Mod] [ERROR] 找不到字段: {fieldName}，请检查游戏版本是否变更了字段名。");
-                    return;
-                }
-
-                // 2. 计算并转换
                 double rawCalculated = baseValue * multiplier;
-
-                // 根据字段的实际类型进行转换
                 object finalValue;
-                if (field.FieldType == typeof(float))
+
+                
+                if (field.FieldType == typeof(int))
                 {
+                    // 如果是 int 
+                    finalValue = (int)Math.Round(rawCalculated);
+                }
+                else if (field.FieldType == typeof(float))
+                {
+                    // 如果是 float 
                     finalValue = (float)rawCalculated;
                 }
                 else
                 {
-                    finalValue = Convert.ToInt32(rawCalculated);
+                    finalValue = Convert.ChangeType(rawCalculated, field.FieldType);
                 }
 
-                // 3. 执行注入
                 field.SetValue(target, finalValue);
 
-                // 4. 同步修改 DefaultValues 
-                if (target.DefaultValues != null)
+                // 同步修改 DefaultValues（这是对付老兵的关键）
+                if (target.DefaultValues != null && target.DefaultValues != target)
                 {
                     field.SetValue(target.DefaultValues, finalValue);
                 }
-
-                DXLog.Write($"[Test_Mod] [SUCCESS] 字段 {fieldName} 修改成功: {baseValue} -> {finalValue} (Type: {field.FieldType.Name})");
             }
             catch (Exception ex)
             {
-                DXLog.Write($"[Test_Mod] [ERROR] 修改字段 {fieldName} 时发生异常: {ex.GetType().Name} - {ex.Message}");
+                DXLog.Write($"[Test_Mod] [ERROR] 注入 {fieldName} 失败: {ex.Message}");
+            }
+        }
+
+        private static void _processCommandParams(object commandObj, string label, int bDmg, double mDmg, float bRng, double mRng, int bTime, double mSpd)
+        {
+            FieldInfo paramsField = commandObj.GetType().GetField("_Params", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            object realParams = paramsField?.GetValue(commandObj);
+
+            if (realParams != null)
+            {
+                _updateIntField(realParams, "_Damage", bDmg, mDmg / 100.0, label);
+                _updateFloatField(realParams, "_ActionRange", bRng, mRng / 100.0, label);
+
+                // 攻速
+                double speedFactor = Math.Max(0.1, mSpd / 100.0);
+                int finalInterval = (int)Math.Max(1, bTime / speedFactor);
+                FieldInfo timeField = realParams.GetType().GetField("_TimeAction", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                timeField?.SetValue(realParams, finalInterval);
+
+                DXLog.Write($"[Test_Mod] [{label}] _TimeAction -> {finalInterval} (Factor: {speedFactor})");
             }
         }
 
