@@ -1,6 +1,7 @@
 ﻿using AX.ModLoader;
 using AX.ModLoader.Config;
 using DXVision;
+using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,7 +11,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using ZX;
-using HarmonyLib;
+using ZX.Entities;
 
 
 namespace ranger_boost
@@ -65,9 +66,59 @@ namespace ranger_boost
             }
         }
 
-        //核心注入方法：根据实体ID扫描并修改属性,传入 ID,基础属性参考值,计算参数等
+        // 钩住 Human 的 AddExperience 方法，来实现老兵晋升时的回血效果（这里懒得找具体的晋升通知方法了
+        // ，通过检测增加经验值中需要查看是否晋升真值的这个方法，来间接去实现晋升时的生命值恢复）
+        [HarmonyPatch(typeof(Human), "AddExperience")]
+        public class Patch_VeteranHeal
+        {
+            private static bool _wasVeteranBefore;
+
+
+            // 执行前：记录是否已经是老兵，防止重复执行
+            public static void Prefix(Human __instance)
+            {
+                _wasVeteranBefore = __instance.IsVeteran;
+            }
+
+            // 执行后：如果状态从 false 变为 true，说明这一刻晋升了
+            public static void Postfix(Human __instance)
+            {
+
+                if (Instance == null || Instance.Config == null) return;
+                var c = Instance.Config;
+
+                if (!c.IsFull_HP)
+                {
+                    return; // 如果配置里没有开启老兵满血，就直接返回，不执行后续代码
+                }
+
+                if (!_wasVeteranBefore && __instance.IsVeteran)
+                {
+                    try
+                    {
+                        // 获取最大生命值（从配置参数中获取）
+                        // 注意：ep._Life 是数据表中修改后的那个上限
+                        var ep = __instance.get_Params();
+                        if (ep != null)
+                        {
+                            // 设置实时生命值为上限值
+                            __instance._CLife._Life = ep._Life;
+
+                            DXLog.Write($"[Test_Mod] 单位 {__instance.ID} 晋升老兵，瞬间回满血: {ep._Life}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // 确保不会因为意外崩溃影响主进程
+                        DXLog.Write($"[Test_Mod] [ERROR] 老兵满血处理失败: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        // 核心注入方法：根据实体ID扫描并修改属性
         public static void ApplyUnitStats(string entity_ID, float bLife, float bSpeed, float bRange, float bVision, int bDamage, int bTimeAction,
-    double mLife, double mSpeed, double mRange, double mVision, double aArmor, double mDamage, double mAtkSpeed)
+            double mLife, double mSpeed, double mRange, double mVision, double aArmor, double mDamage, double mAtkSpeed)
         {
             var allParams = ZXDefaultParams.get_All();
             if (allParams == null) return;
@@ -82,12 +133,12 @@ namespace ranger_boost
                     {
                         DXLog.Write($"\n[Test_Mod] >>> 开始注入单位: {entity_ID} (Instance: {ep.GetHashCode()})");
 
-                        // 1. 基础属性注入 (内部已含 DefaultValues 同步)
+                        // 1. 基础属性注入 (使用已修正类型转换的 _setFieldSafe)
                         _setFieldSafe(ep, "_Life", bLife, mLife / 100.0);
                         _setFieldSafe(ep, "_RunSpeed", bSpeed, mSpeed / 100.0);
                         _setFieldSafe(ep, "_WatchRange", bVision, mVision / 100.0);
 
-                        // 2. 护甲特殊处理
+                        // 2. 护甲特殊处理 (护甲值与其他属性不太一样，加算而且数值很小)
                         FieldInfo armorField = typeof(ZXEntityDefaultParams).GetField("_Armor", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
                         if (armorField != null)
                         {
@@ -97,38 +148,45 @@ namespace ranger_boost
                             DXLog.Write($"[Test_Mod] [Armor] {entity_ID} -> {armorVal} (DefaultValues已同步)");
                         }
 
-                        // 3. 战斗属性注入 (深入 AttackCommand 内部)
-                        FieldInfo shellField = typeof(ZXEntityDefaultParams).GetField("_AttackCommandBasic", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                        object shellObj = shellField?.GetValue(ep);
+                        // 3. 战斗属性注入
+                        // 定义需要处理的攻击命令字段名，前者是新兵攻击，后者为老兵的
+                        string[] commandFieldNames = { "_AttackCommandBasic", "_AttackCommandVeteran" };
 
-                        if (shellObj != null)
+                        foreach (string fieldName in commandFieldNames)
                         {
-                            // 修改当前实体的攻击参数
-                            _processCommandParams(shellObj, "Instance", bDamage, mDamage, bRange, mRange, bTimeAction, mAtkSpeed);
+                            FieldInfo shellField = typeof(ZXEntityDefaultParams).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                            object shellObj = shellField?.GetValue(ep);
 
-                            
-                            if (ep.DefaultValues is ZXEntityDefaultParams dep)
+                            if (shellObj != null)
                             {
-                                object dShellObj = shellField?.GetValue(dep);
-                                if (dShellObj != null)
+                                // 修改当前实体的攻击参数 (新兵或老兵是通用的)
+                                _processCommandParams(shellObj, $"{fieldName}.Instance", bDamage, mDamage, bRange, mRange, bTimeAction, mAtkSpeed);
+
+                                // 同步 DefaultValues 里的攻击参数
+                                if (ep.DefaultValues is ZXEntityDefaultParams dep)
                                 {
-                                    DXLog.Write($"[Test_Mod] [Command] 正在同步 {entity_ID} 的 DefaultValues 攻击参数...");
-                                    _processCommandParams(dShellObj, "DefaultValues", bDamage, mDamage, bRange, mRange, bTimeAction, mAtkSpeed);
+                                    object dShellObj = shellField?.GetValue(dep);
+                                    if (dShellObj != null)
+                                    {
+                                        DXLog.Write($"[Test_Mod] [Command] 正在同步 {entity_ID} 的 DefaultValues.{fieldName} 攻击参数...");
+                                        _processCommandParams(dShellObj, $"{fieldName}.DefaultValues", bDamage, mDamage, bRange, mRange, bTimeAction, mAtkSpeed);
+                                    }
                                 }
                             }
                         }
+
                         DXLog.Write($"[Test_Mod] <<< {entity_ID} 注入流程结束\n");
                     }
                     catch (Exception ex)
                     {
-                        DXLog.Write($"[Test_Mod] [FATAL] {entity_ID} 注入崩溃: {ex.StackTrace}");
+                        DXLog.Write($"[Test_Mod] [FATAL] {entity_ID} 注入崩溃: {ex.Message}");
                     }
                 }
             }
         }
 
-        
-        // 增加了 string label 参数，用于日志区分，和排查日志
+
+        // 增加了 string label 参数，用于日志区分，和排查日志，这两个方法是用于params中注入攻击数值的
         private static void _updateIntField(object target, string fieldName, int baseVal, double mult, string label)
         {
             if (target == null) return;
@@ -165,7 +223,7 @@ namespace ranger_boost
             }
         }
 
-        // 核心：带日志的安全注入工具
+        // 核心：带日志的安全注入工具，它是注入非攻击数值的方法
         private static void _setFieldSafe(ZXEntityDefaultParams target, string fieldName, float baseValue, double multiplier)
         {
             try
@@ -206,6 +264,8 @@ namespace ranger_boost
             }
         }
 
+        //这是专门给攻击参数注入的方法，因为攻击的参数比较特殊，不与生命，护甲等其他值放在一起
+        //，而是放在一个单独的命令参数对象里，所以需要专门处理，增加了日志输出以便排查问题
         private static void _processCommandParams(object commandObj, string label, int bDmg, double mDmg, float bRng, double mRng, int bTime, double mSpd)
         {
             FieldInfo paramsField = commandObj.GetType().GetField("_Params", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
@@ -290,7 +350,7 @@ namespace ranger_boost
     {
         // ================= 全局设置 =================
         [ConfigOption("老兵恢复满血", ConfigOptionType.Checkbox,
-            Description = "单位晋升老兵时，是否恢复满血（开发中）",
+            Description = "单位晋升老兵时，是否恢复满血",
             Category = "全局设置", Order = 1)]
         public bool IsFull_HP { get; set; } = true;
 
