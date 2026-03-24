@@ -14,7 +14,7 @@ using ZX;
 using ZX.Entities;
 
 
-namespace ranger_boost
+namespace entity_boost
 {
     public class Boost_Mod : IModEntry 
     {
