@@ -50,15 +50,15 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ranger_boost\ranger_boost.cs" />
+    <Compile Include="entity_boost\entity_boost.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <None Include="ranger_boost\ModInfos.json" />
+    <None Include="entity_boost\ModInfos.json" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="ranger_boost\ZXRules\" />
+    <Folder Include="entity_boost\ZXRules\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
