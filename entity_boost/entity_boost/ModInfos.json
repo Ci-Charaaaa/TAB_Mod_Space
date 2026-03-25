@@ -1,9 +1,9 @@
 {
   "Id": "com.charaa.test1",
   "Name": "实体增强",
-  "Version": "0.0.7",
+  "Version": "0.0.8",
   "Author": "charaa",
-  "Description": "主要功能是在游戏内修改实体的各项属性,目前支持士兵与游侠",
+  "Description": "主要功能是在游戏内修改实体的各项属性,目前支持士兵,游侠以及狙击手",
   "IsCampaign": false,
   "IsGlobalEnabled": true,
   "Dependencies": [],

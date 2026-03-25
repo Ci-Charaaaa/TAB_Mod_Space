@@ -55,14 +55,19 @@ namespace entity_boost
                 var c = Instance.Config;
 
                 // 游侠
-                ApplyUnitStats("Ranger", 60f, 4f, 6f, 8f, 10, 1000,
+                ApplyUnitStats("Ranger", 60f, 4f, 6f, 8f, 10, 1000, 0, 0.05f,
                     c.Ranger_HealthyMult, c.Ranger_SpeedMult, c.Ranger_RangeMult,
                     c.Ranger_VisionMult, c.Ranger_ArmorAdd, c.Ranger_DamageMult, c.Ranger_DamageSpeedMult);
 
                 // 士兵
-                ApplyUnitStats("SoldierRegular", 120f, 2.4f, 5f, 6f, 16, 500,
+                ApplyUnitStats("SoldierRegular", 120f, 2.4f, 5f, 6f, 16, 500, 0, 0.40f,
                     c.Soldier_HealthyMult, c.Soldier_SpeedMult, c.Soldier_RangeMult,
                     c.Soldier_VisionMult, c.Soldier_ArmorAdd, c.Soldier_DamageMult, c.Soldier_DamageSpeedMult);
+
+                //狙击手
+                ApplyUnitStats("Sniper", 150f, 1.8f, 8f, 9f, 100, 600, 1600, 0.05f,
+                    c.Sniper_HealthyMult,c.Sniper_SpeedMult,c.Sniper_RangeMult,
+                    c.Sniper_VisionMult,c.Sniper_ArmorAdd,c.Sniper_DamageMult,c.Sniper_DamageSpeedMult);
             }
         }
 
@@ -117,8 +122,8 @@ namespace entity_boost
         }
 
         // 核心注入方法：根据实体ID扫描并修改属性
-        public static void ApplyUnitStats(string entity_ID, float bLife, float bSpeed, float bRange, float bVision, int bDamage, int bTimeAction,
-            double mLife, double mSpeed, double mRange, double mVision, double aArmor, double mDamage, double mAtkSpeed)
+        public static void ApplyUnitStats(string entity_ID, float bLife, float bSpeed, float bRange, float bVision, int bDamage, int bTimeAction, int bTimePrep, float bArmor,
+             double mLife, double mSpeed, double mRange, double mVision, double aArmor, double mDamage, double mAtkSpeed)
         {
             var allParams = ZXDefaultParams.get_All();
             if (allParams == null) return;
@@ -126,165 +131,100 @@ namespace entity_boost
             foreach (var p in allParams)
             {
                 if (p == null || p.ID != entity_ID) continue;
-
                 if (p is ZXEntityDefaultParams ep)
                 {
                     try
                     {
-                        DXLog.Write($"\n[Test_Mod] >>> 开始注入单位: {entity_ID} (Instance: {ep.GetHashCode()})");
+                        DXLog.Write($"\n[Test_Mod] >>> 注入单位: {entity_ID}");
 
-                        // 1. 基础属性注入 (使用已修正类型转换的 _setFieldSafe)
-                        _setFieldSafe(ep, "_Life", bLife, mLife / 100.0);
-                        _setFieldSafe(ep, "_RunSpeed", bSpeed, mSpeed / 100.0);
-                        _setFieldSafe(ep, "_WatchRange", bVision, mVision / 100.0);
+                        // 1. 基础属性
+                        _setField(ep, "_Life", (float)(bLife * mLife / 100.0));
+                        _setField(ep, "_RunSpeed", (float)(bSpeed * mSpeed / 100.0));
+                        _setField(ep, "_WatchRange", (float)(bVision * mVision / 100.0));
 
-                        // 2. 护甲特殊处理 (护甲值与其他属性不太一样，加算而且数值很小)
-                        FieldInfo armorField = typeof(ZXEntityDefaultParams).GetField("_Armor", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                        if (armorField != null)
+                        // 2. 护甲处理
+                        float finalArmor = Math.Max(0f, Math.Min(0.99f, (float)(bArmor + aArmor)));
+                        _setField(ep, "_Armor", finalArmor);
+
+                        // 3. 攻击指令注入 (处理 _AttackCommandBasic 和 _AttackCommandVeteran)
+                        string[] cmds = { "_AttackCommandBasic", "_AttackCommandVeteran" };
+                        foreach (var cmdName in cmds)
                         {
-                            float armorVal = (float)aArmor;
-                            armorField.SetValue(ep, armorVal);
-                            if (ep.DefaultValues != null) armorField.SetValue(ep.DefaultValues, armorVal);
-                            DXLog.Write($"[Test_Mod] [Armor] {entity_ID} -> {armorVal} (DefaultValues已同步)");
-                        }
-
-                        // 3. 战斗属性注入
-                        // 定义需要处理的攻击命令字段名，前者是新兵攻击，后者为老兵的
-                        string[] commandFieldNames = { "_AttackCommandBasic", "_AttackCommandVeteran" };
-
-                        foreach (string fieldName in commandFieldNames)
-                        {
-                            FieldInfo shellField = typeof(ZXEntityDefaultParams).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                            object shellObj = shellField?.GetValue(ep);
-
-                            if (shellObj != null)
+                            FieldInfo cmdField = typeof(ZXEntityDefaultParams).GetField(cmdName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                            object cmdObj = cmdField?.GetValue(ep);
+                            if (cmdObj != null)
                             {
-                                // 修改当前实体的攻击参数 (新兵或老兵是通用的)
-                                _processCommandParams(shellObj, $"{fieldName}.Instance", bDamage, mDamage, bRange, mRange, bTimeAction, mAtkSpeed);
+                                _processCommandParams(cmdObj, $"{cmdName}", bDamage, mDamage, bRange, mRange, bTimeAction, bTimePrep, mAtkSpeed);
 
-                                // 同步 DefaultValues 里的攻击参数
+                                // 同步修改 DefaultValues 里的指令
                                 if (ep.DefaultValues is ZXEntityDefaultParams dep)
                                 {
-                                    object dShellObj = shellField?.GetValue(dep);
-                                    if (dShellObj != null)
-                                    {
-                                        DXLog.Write($"[Test_Mod] [Command] 正在同步 {entity_ID} 的 DefaultValues.{fieldName} 攻击参数...");
-                                        _processCommandParams(dShellObj, $"{fieldName}.DefaultValues", bDamage, mDamage, bRange, mRange, bTimeAction, mAtkSpeed);
-                                    }
+                                    object dCmdObj = cmdField?.GetValue(dep);
+                                    if (dCmdObj != null) _processCommandParams(dCmdObj, $"{cmdName}.Default", bDamage, mDamage, bRange, mRange, bTimeAction, bTimePrep, mAtkSpeed);
                                 }
                             }
                         }
-
-                        DXLog.Write($"[Test_Mod] <<< {entity_ID} 注入流程结束\n");
+                        DXLog.Write($"[Test_Mod] <<< {entity_ID} 注入流程结束");
                     }
-                    catch (Exception ex)
-                    {
-                        DXLog.Write($"[Test_Mod] [FATAL] {entity_ID} 注入崩溃: {ex.Message}");
-                    }
+                    catch (Exception ex) { DXLog.Write($"[Test_Mod] [FATAL] {entity_ID} 崩溃: {ex.Message}"); }
                 }
             }
         }
 
-
-        // 增加了 string label 参数，用于日志区分，和排查日志，这两个方法是用于params中注入攻击数值的
-        private static void _updateIntField(object target, string fieldName, int baseVal, double mult, string label)
+        //这是数值注入的核心方法：反射设置字段值，并处理类型转换，同时增加了对单位配置镜像 DefaultValues 的同步修改
+        private static void _setField(object target, string fieldName, object value)
         {
             if (target == null) return;
-
-            FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-            if (field != null)
+            FieldInfo f = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (f != null)
             {
-                int final = (int)(baseVal * mult);
-                field.SetValue(target, final);
-                // 在日志中输出 label (例如 "Instance" 或 "DefaultValues")
-                DXLog.Write($"[Test_Mod] [{label}] {fieldName} (Int32) -> {final}");
-            }
-            else
-            {
-                DXLog.Write($"[Test_Mod] [ERROR] [{label}] 找不到字段: {fieldName}");
-            }
-        }
+                object finalVal = Convert.ChangeType(value, f.FieldType);
+                f.SetValue(target, finalVal);
 
-        private static void _updateFloatField(object target, string fieldName, float baseVal, double mult, string label)
-        {
-            if (target == null) return;
-
-            FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-            if (field != null)
-            {
-                float final = (float)(baseVal * mult);
-                field.SetValue(target, final);
-                // 在日志中输出 label
-                DXLog.Write($"[Test_Mod] [{label}] {fieldName} (Single) -> {final}");
-            }
-            else
-            {
-                DXLog.Write($"[Test_Mod] [ERROR] [{label}] 找不到字段: {fieldName}");
-            }
-        }
-
-        // 核心：带日志的安全注入工具，它是注入非攻击数值的方法
-        private static void _setFieldSafe(ZXEntityDefaultParams target, string fieldName, float baseValue, double multiplier)
-        {
-            try
-            {
-                FieldInfo field = typeof(ZXEntityDefaultParams).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                if (field == null) return;
-
-                double rawCalculated = baseValue * multiplier;
-                object finalValue;
-
-                
-                if (field.FieldType == typeof(int))
+                // 如果是单位配置，同步修改其对应的 DefaultValues 镜像
+                if (target is ZXEntityDefaultParams ep && ep.DefaultValues != null && ep.DefaultValues != ep)
                 {
-                    // 如果是 int 
-                    finalValue = (int)Math.Round(rawCalculated);
+                    _setField(ep.DefaultValues, fieldName, value);
                 }
-                else if (field.FieldType == typeof(float))
-                {
-                    // 如果是 float 
-                    finalValue = (float)rawCalculated;
-                }
-                else
-                {
-                    finalValue = Convert.ChangeType(rawCalculated, field.FieldType);
-                }
-
-                field.SetValue(target, finalValue);
-
-                // 同步修改 DefaultValues（这是对付老兵的关键）
-                if (target.DefaultValues != null && target.DefaultValues != target)
-                {
-                    field.SetValue(target.DefaultValues, finalValue);
-                }
-            }
-            catch (Exception ex)
-            {
-                DXLog.Write($"[Test_Mod] [ERROR] 注入 {fieldName} 失败: {ex.Message}");
             }
         }
 
         //这是专门给攻击参数注入的方法，因为攻击的参数比较特殊，不与生命，护甲等其他值放在一起
         //，而是放在一个单独的命令参数对象里，所以需要专门处理，增加了日志输出以便排查问题
-        private static void _processCommandParams(object commandObj, string label, int bDmg, double mDmg, float bRng, double mRng, int bTime, double mSpd)
+        private static void _processCommandParams(object commandObj, string label, int bDmg, double mDmg, float bRng, double mRng, int bTime, int bPrep, double mSpd)
         {
             FieldInfo paramsField = commandObj.GetType().GetField("_Params", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             object realParams = paramsField?.GetValue(commandObj);
 
             if (realParams != null)
             {
-                _updateIntField(realParams, "_Damage", bDmg, mDmg / 100.0, label);
-                _updateFloatField(realParams, "_ActionRange", bRng, mRng / 100.0, label);
-
-                // 攻速
                 double speedFactor = Math.Max(0.1, mSpd / 100.0);
-                int finalInterval = (int)Math.Max(1, bTime / speedFactor);
-                FieldInfo timeField = realParams.GetType().GetField("_TimeAction", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                timeField?.SetValue(realParams, finalInterval);
 
-                DXLog.Write($"[Test_Mod] [{label}] _TimeAction -> {finalInterval} (Factor: {speedFactor})");
+                // 修正字段对应关系：
+                // _Damage: 伤害
+                // _ActionRange: 射程
+                // _TimeAction: 动画执行/间隔 (数表中的 600/1000)
+                // _TimePreAction: 行动前摇 (数表中的 1600/0) -> 关键修正点！
+
+                _setField(realParams, "_Damage", (int)(bDmg * mDmg / 100.0));
+                _setField(realParams, "_ActionRange", (float)(bRng * mRng / 100.0));
+
+                // 缩减动画时间
+                int finalAction = (int)Math.Max(1, bTime / speedFactor);
+                _setField(realParams, "_TimeAction", finalAction);
+
+                // 缩减前摇时间 (狙击手的瞄准逻辑)
+                int finalPreAction = (int)(bPrep / speedFactor);
+                _setField(realParams, "_TimePreAction", finalPreAction);
+
+                // 可选：数表中还有一个“加载时间” (Load)，通常对应 _TimeLoad
+                // 如果你想让狙击手举枪拉栓也变快，可以加上：
+                // _setField(realParams, "_TimeLoad", (int)(500 / speedFactor));
+
+                DXLog.Write($"[Test_Mod] [{label}] 注入: Dmg:{(int)(bDmg * mDmg / 100.0)}, Action:{finalAction}, PreAtk:{finalPreAction}");
             }
         }
+    
 
         /*private void CopyFiles(string file_name,string event_name)
         {
@@ -375,8 +315,8 @@ namespace entity_boost
         [Range(1, 200, 1)]
         public double Ranger_SpeedMult { get; set; } = 100;
 
-        [ConfigOption("游侠-护甲值", ConfigOptionType.Slider, Category = "游侠属性", Order = 6)]
-        [Range(0, 0.50, 0.01)]
+        [ConfigOption("游侠-增加额外护甲值", ConfigOptionType.Slider, Category = "游侠属性", Order = 6)]
+        [Range(0, 0.90, 0.01)]
         public double Ranger_ArmorAdd { get; set; } = 0;
 
         [ConfigOption("游侠-视野倍率", ConfigOptionType.Slider, Category = "游侠属性", Order = 7)]
@@ -404,13 +344,42 @@ namespace entity_boost
         [Range(1, 200, 1)]
         public double Soldier_SpeedMult { get; set; } = 100;
 
-        [ConfigOption("士兵-护甲值", ConfigOptionType.Slider, Category = "士兵属性", Order = 6)]
-        [Range(0, 0.95, 0.01)]
+        [ConfigOption("士兵-增加额外护甲值", ConfigOptionType.Slider, Category = "士兵属性", Order = 6)]
+        [Range(0, 0.55, 0.01)]
         public double Soldier_ArmorAdd { get; set; } = 0;
 
         [ConfigOption("士兵-视野倍率", ConfigOptionType.Slider, Category = "士兵属性", Order = 7)]
         [Range(1, 200, 1)]
         public double Soldier_VisionMult { get; set; } = 100;
+
+        // ================= 狙击手属性 (Sniper) =================
+        [ConfigOption("狙击手-生命倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 1)]
+        [Range(1, 500, 1)]
+        public double Sniper_HealthyMult { get; set; } = 100;
+
+        [ConfigOption("狙击手-攻击倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 2)]
+        [Range(1, 500, 1)] // 狙击手攻击成长空间大，上限给到500
+        public double Sniper_DamageMult { get; set; } = 100;
+
+        [ConfigOption("狙击手-射程倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 3)]
+        [Range(1, 200, 1)]
+        public double Sniper_RangeMult { get; set; } = 100;
+
+        [ConfigOption("狙击手-攻速倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 4)]
+        [Range(1, 500, 1)] // 默认极慢，给高倍率提升手感
+        public double Sniper_DamageSpeedMult { get; set; } = 100;
+
+        [ConfigOption("狙击手-移速倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 5)]
+        [Range(1, 200, 1)]
+        public double Sniper_SpeedMult { get; set; } = 100;
+
+        [ConfigOption("狙击手-增加额外护甲值", ConfigOptionType.Slider, Category = "狙击手属性", Order = 6)]
+        [Range(0, 0.90, 0.01)]
+        public double Sniper_ArmorAdd { get; set; } = 0;
+
+        [ConfigOption("狙击手-视野倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 7)]
+        [Range(1, 200, 1)]
+        public double Sniper_VisionMult { get; set; } = 100;
     }
 
 }
