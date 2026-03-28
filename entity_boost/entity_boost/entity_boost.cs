@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ZX;
 using ZX.Entities;
@@ -31,8 +32,8 @@ namespace entity_boost
 
             Instance = this;
 
-            var harmony = new Harmony("com.charaa.test1");
-            harmony.UnpatchAll("com.charaa.test1");
+            var harmony = new Harmony("entity_boost");
+            harmony.UnpatchAll("entity_boost");
             harmony.PatchAll(Assembly.GetExecutingAssembly()); // 告诉 Harmony 扫描这个项目里的 [HarmonyPatch]
 
             DXLog.Write($"[Test_Mod] Harmony 补丁已应用！正在等待游戏逻辑初始化...,随时准备进行属性加强模块注入");
@@ -57,17 +58,20 @@ namespace entity_boost
                 // 游侠
                 ApplyUnitStats("Ranger", 
                     c.Ranger_HealthyMult, c.Ranger_SpeedMult, c.Ranger_RangeMult,
-                    c.Ranger_VisionMult, c.Ranger_ArmorAdd, c.Ranger_DamageMult, c.Ranger_DamageSpeedMult);
+                    c.Ranger_VisionMult, c.Ranger_ArmorAdd, c.Ranger_FireResistArmor,
+                    c.Ranger_PoisonResistArmor, c.Ranger_DamageMult, c.Ranger_DamageSpeedMult);
 
                 // 士兵
                 ApplyUnitStats("SoldierRegular", 
                     c.Soldier_HealthyMult, c.Soldier_SpeedMult, c.Soldier_RangeMult,
-                    c.Soldier_VisionMult, c.Soldier_ArmorAdd, c.Soldier_DamageMult, c.Soldier_DamageSpeedMult);
+                    c.Soldier_VisionMult, c.Soldier_ArmorAdd, c.Soldier_FireResistArmor, c.Soldier_PoisonResistArmor,
+                    c.Soldier_DamageMult, c.Soldier_DamageSpeedMult);
 
                 //狙击手
                 ApplyUnitStats("Sniper", 
                     c.Sniper_HealthyMult,c.Sniper_SpeedMult,c.Sniper_RangeMult,
-                    c.Sniper_VisionMult,c.Sniper_ArmorAdd,c.Sniper_DamageMult,c.Sniper_DamageSpeedMult);
+                    c.Sniper_VisionMult,c.Sniper_ArmorAdd, c.Sniper_FireResistArmor, c.Sniper_PoisonResistArmor,
+                    c.Sniper_DamageMult,c.Sniper_DamageSpeedMult);
             }
         }
 
@@ -162,7 +166,8 @@ namespace entity_boost
         }
 
         // 核心注入方法：根据实体ID扫描并修改属性
-        public static void ApplyUnitStats(string entity_ID, double mLife, double mSpeed, double mRange, double mVision, double aArmor, double mDamage, double mAtkSpeed)
+        public static void ApplyUnitStats(string entity_ID, double mLife, double mSpeed, double mRange, double 
+            mVision, double aArmor,double aFireArmor,double aPoisonArmor, double mDamage, double mAtkSpeed)
         {
             var allParams = ZXDefaultParams.get_All();
             if (allParams == null) return;
@@ -176,14 +181,29 @@ namespace entity_boost
                     var def = ep.DefaultValues as ZXEntityDefaultParams;
                     if (def == null) continue;
 
+                    FieldInfo[] arrFieldinfo =  ep.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    foreach (FieldInfo fieldname in arrFieldinfo)
+                    {
+                        DXLog.Write($"[Test_Mod] Debug: {entity_ID} 的字段 {fieldname.Name} 原始值 {fieldname.GetValue(ep)}");
+                    }
+
                     // 1. 基础属性注入：基于默认值计算
                     _setField(ep, "_Life", (float)(def._Life * mLife / 100.0));
                     _setField(ep, "_RunSpeed", (float)(def._RunSpeed * mSpeed / 100.0));
                     _setField(ep, "_WatchRange", (float)(def._WatchRange * mVision / 100.0));
 
-                    // 2. 护甲
+                    // 2. 三类护甲
                     float finalArmor = Math.Max(0f, Math.Min(0.99f, (float)(def._Armor + aArmor)));
                     _setField(ep, "_Armor", finalArmor);
+                    // 火焰伤害因子
+                    float finalFireFactor = Math.Max(0f, Math.Min(0.99f, (float)(def.FireDamageFactor - aFireArmor)));
+                    _setField(ep, "_FireDamageFactor", finalFireFactor);
+
+                    // 毒液伤害因子
+                    float finalVenomFactor = Math.Max(0f, Math.Min(0.99f, (float)(def.VenomDamageFactor - aPoisonArmor)));
+                    _setField(ep, "_VenomDamageFactor", finalVenomFactor);
+
+
 
                     // 3. 攻击指令注入
                     string[] cmds = { "_AttackCommandBasic", "_AttackCommandVeteran" };
@@ -212,18 +232,13 @@ namespace entity_boost
             FieldInfo f = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             if (f != null)
             {
+                // 简单直接的赋值即可，不要去碰 ep.DefaultValues
                 object finalVal = Convert.ChangeType(value, f.FieldType);
                 f.SetValue(target, finalVal);
-
-                // 如果是单位配置，同步修改其对应的 DefaultValues 镜像
-                if (target is ZXEntityDefaultParams ep && ep.DefaultValues != null && ep.DefaultValues != ep)
-                {
-                    _setField(ep.DefaultValues, fieldName, value);
-                }
             }
         }
 
-        
+
 
         /*private void CopyFiles(string file_name,string event_name)
         {
@@ -318,7 +333,15 @@ namespace entity_boost
         [Range(0, 0.90, 0.01)]
         public double Ranger_ArmorAdd { get; set; } = 0;
 
-        [ConfigOption("游侠-视野倍率", ConfigOptionType.Slider, Category = "游侠属性", Order = 7)]
+        [ConfigOption("游侠-增加额外毒抗", ConfigOptionType.Slider, Category = "游侠属性", Order = 7)]
+        [Range(0, 1.0, 0.01)]
+        public double Ranger_PoisonResistArmor { get; set; } = 0;
+
+        [ConfigOption("游侠-增加额外火抗", ConfigOptionType.Slider, Category = "游侠属性", Order = 8)]
+        [Range(0, 1.0, 0.01)]
+        public double Ranger_FireResistArmor { get; set; } = 0;
+
+        [ConfigOption("游侠-视野倍率", ConfigOptionType.Slider, Category = "游侠属性", Order = 9)]
         [Range(1, 200, 1)]
         public double Ranger_VisionMult { get; set; } = 100;
 
@@ -347,7 +370,15 @@ namespace entity_boost
         [Range(0, 0.55, 0.01)]
         public double Soldier_ArmorAdd { get; set; } = 0;
 
-        [ConfigOption("士兵-视野倍率", ConfigOptionType.Slider, Category = "士兵属性", Order = 7)]
+        [ConfigOption("士兵-增加额外毒抗", ConfigOptionType.Slider, Category = "士兵属性", Order = 7)]
+        [Range(0, 0.50, 0.01)]
+        public double Soldier_PoisonResistArmor { get; set; } = 0;
+
+        [ConfigOption("士兵-增加额外火炕", ConfigOptionType.Slider, Category = "士兵属性", Order = 8)]
+        [Range(0, 0.50, 0.01)]
+        public double Soldier_FireResistArmor { get; set; } = 0;
+
+        [ConfigOption("士兵-视野倍率", ConfigOptionType.Slider, Category = "士兵属性", Order = 9)]
         [Range(1, 200, 1)]
         public double Soldier_VisionMult { get; set; } = 100;
 
@@ -357,7 +388,7 @@ namespace entity_boost
         public double Sniper_HealthyMult { get; set; } = 100;
 
         [ConfigOption("狙击手-攻击倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 2)]
-        [Range(1, 500, 1)] // 狙击手攻击成长空间大，上限给到500
+        [Range(1, 500, 1)] // 我是狙击手猎鹰，枪枪爆头，好运连连
         public double Sniper_DamageMult { get; set; } = 100;
 
         [ConfigOption("狙击手-射程倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 3)]
@@ -365,7 +396,7 @@ namespace entity_boost
         public double Sniper_RangeMult { get; set; } = 100;
 
         [ConfigOption("狙击手-攻速倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 4)]
-        [Range(1, 500, 1)] // 默认极慢，给高倍率提升手感
+        [Range(1, 500, 1)] // 基础攻速极慢，给更高倍率
         public double Sniper_DamageSpeedMult { get; set; } = 100;
 
         [ConfigOption("狙击手-移速倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 5)]
@@ -376,7 +407,15 @@ namespace entity_boost
         [Range(0, 0.90, 0.01)]
         public double Sniper_ArmorAdd { get; set; } = 0;
 
-        [ConfigOption("狙击手-视野倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 7)]
+        [ConfigOption("狙击手-增加额外火炕", ConfigOptionType.Slider, Category = "狙击手属性", Order = 7)]
+        [Range(0, 1.0, 0.01)]
+        public double Sniper_PoisonResistArmor { get; set; } = 0;
+
+        [ConfigOption("狙击手-增加额外火炕", ConfigOptionType.Slider, Category = "狙击手属性", Order = 8)]
+        [Range(0, 1.0, 0.01)]
+        public double Sniper_FireResistArmor { get; set; } = 0;
+
+        [ConfigOption("狙击手-视野倍率", ConfigOptionType.Slider, Category = "狙击手属性", Order = 9)]
         [Range(1, 200, 1)]
         public double Sniper_VisionMult { get; set; } = 100;
     }

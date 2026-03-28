@@ -1,7 +1,7 @@
 {
-  "Id": "com.charaa.test1",
+  "Id": "entity_boost",
   "Name": "实体增强",
-  "Version": "0.1.0",
+  "Version": "0.1.1",
   "Author": "charaa",
   "Description": "主要功能是在游戏内修改实体的各项属性,目前支持士兵,游侠以及狙击手",
   "IsCampaign": false,
