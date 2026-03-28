@@ -1,0 +1,17 @@
+{
+  "Id": "entity_boost",
+  "Name": "实体复制",
+  "Version": "0.0.1",
+  "Author": "charaa",
+  "Description": "主要功能是在游戏内紧急复制兵种，避免开饭",
+  "IsCampaign": false,
+  "IsGlobalEnabled": true,
+  "Dependencies": [],
+  "ConflictsWith": [],
+  "Priority": 0,
+  "Enabled": true,
+  "RequiredModLoaderVersion": "1.1.1",
+  "RepositoryUrl": "https://github.com/Ci-Charaaaa/TAB_Mod_Space/tree/master/MyModTest1",
+  "AllowAutoUpdate": true,
+  "ShowInCustomLevels": true
+}
