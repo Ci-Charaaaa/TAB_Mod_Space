@@ -4,49 +4,36 @@ using DXVision;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using ZX;
 using ZX.Entities;
 
-
 namespace entity_boost
 {
-    public class Boost_Mod : IModEntry 
+    public class Boost_Mod : IModEntry
     {
-        private Mod entity_boost_mod;
         public Unit_Total_Config Config;
         public static Boost_Mod Instance;
+        private Mod entity_boost_mod;
 
+        //锁死原始数值字典
+        private static readonly Dictionary<string, float> _originalValues = new Dictionary<string, float>();
 
         public override void OnLoad(Mod mod)
         {
             entity_boost_mod = mod;
             Config = mod.RegisterConfig<Unit_Total_Config>();
-            DXLog.Write($"[Test_Mod] 已加载！版本：{mod.Info.Version} gugugaga!");
-
             Instance = this;
 
             var harmony = new Harmony("entity_boost");
             harmony.UnpatchAll("entity_boost");
-            harmony.PatchAll(Assembly.GetExecutingAssembly()); // 告诉 Harmony 扫描这个项目里的 [HarmonyPatch]
+            harmony.PatchAll(Assembly.GetExecutingAssembly());
 
-            DXLog.Write($"[Test_Mod] Harmony 补丁已应用！正在等待游戏逻辑初始化...,随时准备进行属性加强模块注入");
+            DXLog.Write($"[Entity_Boost] 加载成功！");
 
-            Config.OnConfigChanged += (c) => 
-            { entity_boost_mod.SaveConfig(); 
-                DXLog.Write("[Test_Mod] 配置已保存");
-            };
-
-
+            Config.OnConfigChanged += (c) => { entity_boost_mod.SaveConfig(); };
         }
 
-        // 钩住 ApplyMods
         [HarmonyPatch(typeof(ZXDefaultParams), "ApplyMods")]
         public class InjectionPatch
         {
@@ -55,223 +42,141 @@ namespace entity_boost
                 if (Instance == null || Instance.Config == null) return;
                 var c = Instance.Config;
 
-                // 游侠
-                ApplyUnitStats("Ranger", 
-                    c.Ranger_HealthyMult, c.Ranger_SpeedMult, c.Ranger_RangeMult,
-                    c.Ranger_VisionMult, c.Ranger_ArmorAdd, c.Ranger_FireResistArmor,
-                    c.Ranger_PoisonResistArmor, c.Ranger_DamageMult, c.Ranger_DamageSpeedMult);
+                // 统一调用修改
+                ApplyUnitStats("Ranger", c.Ranger_HealthyMult, c.Ranger_SpeedMult, c.Ranger_RangeMult,
+                    c.Ranger_VisionMult, c.Ranger_ArmorAdd, c.Ranger_FireResistArmor, c.Ranger_PoisonResistArmor,
+                    c.Ranger_DamageMult, c.Ranger_DamageSpeedMult);
 
-                // 士兵
-                ApplyUnitStats("SoldierRegular", 
-                    c.Soldier_HealthyMult, c.Soldier_SpeedMult, c.Soldier_RangeMult,
+                ApplyUnitStats("SoldierRegular", c.Soldier_HealthyMult, c.Soldier_SpeedMult, c.Soldier_RangeMult,
                     c.Soldier_VisionMult, c.Soldier_ArmorAdd, c.Soldier_FireResistArmor, c.Soldier_PoisonResistArmor,
                     c.Soldier_DamageMult, c.Soldier_DamageSpeedMult);
 
-                //狙击手
-                ApplyUnitStats("Sniper", 
-                    c.Sniper_HealthyMult,c.Sniper_SpeedMult,c.Sniper_RangeMult,
-                    c.Sniper_VisionMult,c.Sniper_ArmorAdd, c.Sniper_FireResistArmor, c.Sniper_PoisonResistArmor,
-                    c.Sniper_DamageMult,c.Sniper_DamageSpeedMult);
+                ApplyUnitStats("Sniper", c.Sniper_HealthyMult, c.Sniper_SpeedMult, c.Sniper_RangeMult,
+                    c.Sniper_VisionMult, c.Sniper_ArmorAdd, c.Sniper_FireResistArmor, c.Sniper_PoisonResistArmor,
+                    c.Sniper_DamageMult, c.Sniper_DamageSpeedMult);
             }
         }
 
-        // 钩住 Human 的 AddExperience 方法，来实现老兵晋升时的回血效果（这里懒得找具体的晋升通知方法了
-        // ，通过检测增加经验值中需要查看是否晋升真值的这个方法，来间接去实现晋升时的生命值恢复）
         [HarmonyPatch(typeof(Human), "AddExperience")]
         public class Patch_VeteranHeal
         {
             private static bool _wasVeteranBefore;
+            public static void Prefix(Human __instance) => _wasVeteranBefore = __instance.IsVeteran;
 
-
-            // 执行前：记录是否已经是老兵，防止重复执行
-            public static void Prefix(Human __instance)
-            {
-                _wasVeteranBefore = __instance.IsVeteran;
-            }
-
-            // 执行后：如果状态从 false 变为 true，说明这一刻晋升了
             public static void Postfix(Human __instance)
             {
+                if (Instance == null || Instance.Config == null || !Instance.Config.IsFull_HP) return;
 
-                if (Instance == null || Instance.Config == null) return;
-                var c = Instance.Config;
-
-                if (!c.IsFull_HP)
-                {
-                    return; // 如果配置里没有开启老兵满血，就直接返回，不执行后续代码
-                }
-
+                // 当单位从新兵变老兵的那一刻
                 if (!_wasVeteranBefore && __instance.IsVeteran)
                 {
                     try
                     {
-                        // 获取最大生命值（从配置参数中获取）
-                        // 注意：ep._Life 是数据表中修改后的那个上限
                         var ep = __instance.get_Params();
-                        if (ep != null)
+                        if (ep != null && __instance._CLife != null)
                         {
-                            // 设置实时生命值为上限值
-                            __instance._CLife._Life = ep._Life;
+                            
+                            float veteranMax = (float)(ep._Life * 1.2f);
 
-                            DXLog.Write($"[Test_Mod] 单位 {__instance.ID} 晋升老兵，瞬间回满血: {ep._Life}");
+                            // 用 _setField 强行注入当前单位实例
+                            _setField(__instance._CLife, "_Life", veteranMax);
+
+                            DXLog.Write($"[Entity_Boost] 老兵晋升成功: {__instance.ID} 血量同步为 {veteranMax}");
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        // 确保不会因为意外崩溃影响主进程
-                        DXLog.Write($"[Test_Mod] [ERROR] 老兵满血处理失败: {ex.Message}");
-                    }
+                    catch { }
                 }
             }
         }
 
-        // 这是一个核心方法，用于处理攻击指令参数的注入。它接受当前指令对象、默认指令对象
-        // ，以及伤害、射程和攻速的倍率。通过反射读取默认指令中的原始数值
-        // ，应用倍率后再写回当前指令对象，从而实现基于默认值的动态调整。
-        private static void _processCommandParams(object commandObj, object defCommandObj, double mDmg, double mRng, double mSpd)
-
-        {
-            // 获取当前和默认的参数容器 
-            FieldInfo paramsField = commandObj.GetType().GetField("_Params", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-            object realParams = paramsField?.GetValue(commandObj);
-            object defParams = paramsField?.GetValue(defCommandObj);
-            if (realParams != null && defParams != null)
-            {
-                double speedFactor = Math.Max(0.1, mSpd / 100.0);
-                // --- 从默认值镜像中读取原始数值 ---
-                int baseDmg = (int)_getField(defParams, "_Damage");
-                float baseRange = (float)_getField(defParams, "_ActionRange");
-                int baseTimeAction = (int)_getField(defParams, "_TimeAction");
-                int baseTimePrep = (int)_getField(defParams, "_TimePreAction");
-
-                // --- 应用倍率 ---
-                _setField(realParams, "_Damage", (int)(baseDmg * mDmg / 100.0));
-                _setField(realParams, "_ActionRange", (float)(baseRange * mRng / 100.0));
-
-                // 缩减动画时间
-                int finalAction = (int)Math.Max(1, baseTimeAction / speedFactor);
-                _setField(realParams, "_TimeAction", finalAction);
-
-
-                // 缩减前摇时间
-
-                int finalPreAction = (int)(baseTimePrep / speedFactor);
-
-                _setField(realParams, "_TimePreAction", finalPreAction);
-
-            }
-
-        }
-
-        // 辅助方法：反射读取字段
-        private static object _getField(object target, string name)
-        {
-            return target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(target);
-        }
-
-        // 核心注入方法：根据实体ID扫描并修改属性
-        public static void ApplyUnitStats(string entity_ID, double mLife, double mSpeed, double mRange, double
-    mVision, double aArmor, double aFireArmor, double aPoisonArmor, double mDamage, double mAtkSpeed)
+        public static void ApplyUnitStats(string entityID, double mLife, double mSpeed, double mRange, double mVision,
+            double aArmor, double aFire, double aPoison, double mDmg, double mSpd)
         {
             var allParams = ZXDefaultParams.get_All();
             if (allParams == null) return;
 
             foreach (var p in allParams)
             {
-                if (p == null || p.ID != entity_ID) continue;
+                if (p == null || p.ID != entityID) continue;
                 if (p is ZXEntityDefaultParams ep)
                 {
-                    // 【核心修复】获取该单位最原始的 DefaultValues 备份
-                    // 战役模式下，我们需要确保每次计算的起点都是游戏原始数据，而不是上一次修改后的数据
-                    var def = ep.DefaultValues as ZXEntityDefaultParams;
-                    if (def == null) continue;
+                    // 1. 基础属性 (使用字典锁定原始值，防止叠乘)
+                    _setSafeValue(ep, entityID, "_Life", mLife / 100.0, true);
+                    _setSafeValue(ep, entityID, "_RunSpeed", mSpeed / 100.0, true);
+                    _setSafeValue(ep, entityID, "_WatchRange", mVision / 100.0, true);
 
-                    // 1. 基础属性注入：强制基于 def（备份值）进行计算
-                    _setField(ep, "_Life", (float)(def._Life * mLife / 100.0));
-                    _setField(ep, "_RunSpeed", (float)(def._RunSpeed * mSpeed / 100.0));
-                    _setField(ep, "_WatchRange", (float)(def._WatchRange * mVision / 100.0));
+                    // 2. 护甲与抗性
+                    _setSafeValue(ep, entityID, "_Armor", aArmor, false);
+                    _setSafeValue(ep, entityID, "FireDamageFactor", -aFire, false);
+                    _setSafeValue(ep, entityID, "VenomDamageFactor", -aPoison, false);
 
-                    // 2. 护甲与抗性：基于原始备份值加减
-                    float finalArmor = Math.Max(0f, Math.Min(0.99f, (float)(def._Armor + aArmor)));
-                    _setField(ep, "_Armor", finalArmor);
-
-                    float finalFireFactor = Math.Max(0f, Math.Min(0.99f, (float)(def.FireDamageFactor - aFireArmor)));
-                    _setField(ep, "_FireDamageFactor", finalFireFactor);
-
-                    float finalVenomFactor = Math.Max(0f, Math.Min(0.99f, (float)(def.VenomDamageFactor - aPoisonArmor)));
-                    _setField(ep, "_VenomDamageFactor", finalVenomFactor);
-
-                    // 3. 攻击指令注入
-                    string[] cmds = { "_AttackCommandBasic", "_AttackCommandVeteran" };
-                    foreach (var cmdName in cmds)
-                    {
-                        FieldInfo cmdField = typeof(ZXEntityDefaultParams).GetField(cmdName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                        object cmdObj = cmdField?.GetValue(ep);
-                        object defCmdObj = cmdField?.GetValue(def); // 强制获取原始指令备份
-
-                        if (cmdObj != null && defCmdObj != null)
-                        {
-                            // 传入原始指令对象作为底数，防止在战役中累乘
-                            _processCommandParams(cmdObj, defCmdObj, mDamage, mRange, mAtkSpeed);
-                        }
-                    }
+                    // 3. 攻击指令 (新兵 & 老兵)
+                    _processCommand(ep, entityID, "_AttackCommandBasic", mDmg, mRange, mSpd);
+                    _processCommand(ep, entityID, "_AttackCommandVeteran", mDmg, mRange, mSpd);
                 }
             }
         }
 
-        //这是数值注入的核心方法：反射设置字段值，并处理类型转换，同时增加了对单位配置镜像 DefaultValues 的同步修改
+        private static void _processCommand(ZXEntityDefaultParams ep, string entityID, string cmdName, double mDmg, double mRng, double mSpd)
+        {
+            object cmdObj = _getField(ep, cmdName);
+            if (cmdObj == null) return;
+
+            object realParams = _getField(cmdObj, "_Params");
+            if (realParams == null) return;
+
+            string keyPrefix = $"{entityID}_{cmdName}";
+            double speedFactor = Math.Max(0.1, mSpd / 100.0);
+
+            // 注入伤害与射程
+            _setSafeValue(realParams, keyPrefix, "_Damage", mDmg / 100.0, true);
+            _setSafeValue(realParams, keyPrefix, "_ActionRange", mRng / 100.0, true);
+
+            // 注入攻速与前摇 (TimePreAction)
+            // 修正后的逻辑：使用正确的字段名和 int 转换
+            _setSafeValue(realParams, keyPrefix, "_TimeAction", 1.0 / speedFactor, true);
+            _setSafeValue(realParams, keyPrefix, "_TimePreAction", 1.0 / speedFactor, true);
+        }
+
+        // --- 核心数值保护函数：确保永远基于“出厂设置”进行乘法 ---
+        private static void _setSafeValue(object target, string ownerKey, string fieldName, double value, bool isMult)
+        {
+            string fullKey = $"{ownerKey}_{fieldName}";
+
+            // 如果字典里没有，说明是游戏启动后的第一次加载，记录原始值
+            if (!_originalValues.ContainsKey(fullKey))
+            {
+                object raw = _getField(target, fieldName);
+                if (raw == null) return;
+                _originalValues[fullKey] = Convert.ToSingle(raw);
+            }
+
+            float baseVal = _originalValues[fullKey];
+            float finalVal = isMult ? (float)(baseVal * value) : (float)(baseVal + value);
+
+            // 范围限制 (抗性与护甲)
+            if (fieldName.Contains("Factor") || fieldName == "_Armor")
+                finalVal = Math.Max(0f, Math.Min(1.0f, finalVal));
+
+            _setField(target, fieldName, finalVal);
+        }
+
+        // 辅助方法：反射读写
+        private static object _getField(object target, string name)
+        {
+            return target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(target);
+        }
+
         private static void _setField(object target, string fieldName, object value)
         {
-            if (target == null) return;
             FieldInfo f = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             if (f != null)
             {
-                // 简单直接的赋值即可，不要去碰 ep.DefaultValues
-                object finalVal = Convert.ChangeType(value, f.FieldType);
-                f.SetValue(target, finalVal);
+                // 自动处理 int 和 float 的转换
+                f.SetValue(target, Convert.ChangeType(value, f.FieldType));
             }
         }
-
-
-
-        /*private void CopyFiles(string file_name,string event_name)
-        {
-            try
-            {
-                
-                // 寻找目标资源文件
-                string sourceDir = Path.Combine(test_mod.ModPath, "ZX",file_name);
-                //寻找目标拷贝目录
-                string targetDir = Path.Combine(test_mod.ModPath,"ZXRules.dat");
-
-                if (!File.Exists(sourceDir))
-                {
-                    DXLog.Write($"[Test_Mod] error:源文件夹不存在 {sourceDir}");
-                    return;
-                }
-                else
-                {
-                    DXLog.Write($"[Test_Mod] 找到源文件 {sourceDir}");
-                    File.Copy(sourceDir, targetDir, true);
-
-                    if (!File.Exists(targetDir))
-                    {
-                        DXLog.Write($"[Test Mod] error:哦，牛批，这能没有的 {targetDir}");
-                        return;
-                    }
-
-                    DXLog.Write($"[Test_Mod] 已复制文件到 {targetDir}");
-                   
-                }
-
-                DXLog.Write("[Test_Mod] " + event_name + " 文件部署完成！");
-            }
-            catch (Exception ex)
-            {
-                DXLog.Write($"[Test_Mod] 文件拷贝失败: {ex.Message}");
-            }
-        }*/
-
+    
 
         private void OnConfigChanged(ModConfig config)
         {
