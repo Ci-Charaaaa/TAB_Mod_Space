@@ -129,16 +129,15 @@ namespace entity_boost
         // ，以及伤害、射程和攻速的倍率。通过反射读取默认指令中的原始数值
         // ，应用倍率后再写回当前指令对象，从而实现基于默认值的动态调整。
         private static void _processCommandParams(object commandObj, object defCommandObj, double mDmg, double mRng, double mSpd)
+
         {
             // 获取当前和默认的参数容器 
             FieldInfo paramsField = commandObj.GetType().GetField("_Params", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             object realParams = paramsField?.GetValue(commandObj);
             object defParams = paramsField?.GetValue(defCommandObj);
-
             if (realParams != null && defParams != null)
             {
                 double speedFactor = Math.Max(0.1, mSpd / 100.0);
-
                 // --- 从默认值镜像中读取原始数值 ---
                 int baseDmg = (int)_getField(defParams, "_Damage");
                 float baseRange = (float)_getField(defParams, "_ActionRange");
@@ -153,10 +152,15 @@ namespace entity_boost
                 int finalAction = (int)Math.Max(1, baseTimeAction / speedFactor);
                 _setField(realParams, "_TimeAction", finalAction);
 
+
                 // 缩减前摇时间
+
                 int finalPreAction = (int)(baseTimePrep / speedFactor);
+
                 _setField(realParams, "_TimePreAction", finalPreAction);
+
             }
+
         }
 
         // 辅助方法：反射读取字段
@@ -166,8 +170,8 @@ namespace entity_boost
         }
 
         // 核心注入方法：根据实体ID扫描并修改属性
-        public static void ApplyUnitStats(string entity_ID, double mLife, double mSpeed, double mRange, double 
-            mVision, double aArmor,double aFireArmor,double aPoisonArmor, double mDamage, double mAtkSpeed)
+        public static void ApplyUnitStats(string entity_ID, double mLife, double mSpeed, double mRange, double
+    mVision, double aArmor, double aFireArmor, double aPoisonArmor, double mDamage, double mAtkSpeed)
         {
             var allParams = ZXDefaultParams.get_All();
             if (allParams == null) return;
@@ -177,47 +181,37 @@ namespace entity_boost
                 if (p == null || p.ID != entity_ID) continue;
                 if (p is ZXEntityDefaultParams ep)
                 {
-                    // 关键：获取该单位的原始默认值备份
+                    // 【核心修复】获取该单位最原始的 DefaultValues 备份
+                    // 战役模式下，我们需要确保每次计算的起点都是游戏原始数据，而不是上一次修改后的数据
                     var def = ep.DefaultValues as ZXEntityDefaultParams;
                     if (def == null) continue;
 
-                    FieldInfo[] arrFieldinfo =  ep.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    foreach (FieldInfo fieldname in arrFieldinfo)
-                    {
-                        DXLog.Write($"[Test_Mod] Debug: {entity_ID} 的字段 {fieldname.Name} 原始值 {fieldname.GetValue(ep)}");
-                    }
-
-                    // 1. 基础属性注入：基于默认值计算
+                    // 1. 基础属性注入：强制基于 def（备份值）进行计算
                     _setField(ep, "_Life", (float)(def._Life * mLife / 100.0));
                     _setField(ep, "_RunSpeed", (float)(def._RunSpeed * mSpeed / 100.0));
                     _setField(ep, "_WatchRange", (float)(def._WatchRange * mVision / 100.0));
 
-                    // 2. 三类护甲
+                    // 2. 护甲与抗性：基于原始备份值加减
                     float finalArmor = Math.Max(0f, Math.Min(0.99f, (float)(def._Armor + aArmor)));
                     _setField(ep, "_Armor", finalArmor);
-                    // 火焰伤害因子
+
                     float finalFireFactor = Math.Max(0f, Math.Min(0.99f, (float)(def.FireDamageFactor - aFireArmor)));
                     _setField(ep, "_FireDamageFactor", finalFireFactor);
 
-                    // 毒液伤害因子
                     float finalVenomFactor = Math.Max(0f, Math.Min(0.99f, (float)(def.VenomDamageFactor - aPoisonArmor)));
                     _setField(ep, "_VenomDamageFactor", finalVenomFactor);
-
-
 
                     // 3. 攻击指令注入
                     string[] cmds = { "_AttackCommandBasic", "_AttackCommandVeteran" };
                     foreach (var cmdName in cmds)
                     {
                         FieldInfo cmdField = typeof(ZXEntityDefaultParams).GetField(cmdName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-
-                        // 获取当前指令对象和默认指令对象
                         object cmdObj = cmdField?.GetValue(ep);
-                        object defCmdObj = cmdField?.GetValue(def);
+                        object defCmdObj = cmdField?.GetValue(def); // 强制获取原始指令备份
 
                         if (cmdObj != null && defCmdObj != null)
                         {
-                            // 将“默认指令”作为底数传入，以保留老兵和普通的区别
+                            // 传入原始指令对象作为底数，防止在战役中累乘
                             _processCommandParams(cmdObj, defCmdObj, mDamage, mRange, mAtkSpeed);
                         }
                     }
