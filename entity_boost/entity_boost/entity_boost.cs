@@ -19,14 +19,14 @@ namespace entity_boost
 {
     public class Boost_Mod : IModEntry 
     {
-        private Mod _test_mod;
+        private Mod entity_boost_mod;
         public Unit_Total_Config Config;
         public static Boost_Mod Instance;
 
 
         public override void OnLoad(Mod mod)
         {
-            _test_mod = mod;
+            entity_boost_mod = mod;
             Config = mod.RegisterConfig<Unit_Total_Config>();
             DXLog.Write($"[Test_Mod] 已加载！版本：{mod.Info.Version} gugugaga!");
 
@@ -39,7 +39,7 @@ namespace entity_boost
             DXLog.Write($"[Test_Mod] Harmony 补丁已应用！正在等待游戏逻辑初始化...,随时准备进行属性加强模块注入");
 
             Config.OnConfigChanged += (c) => 
-            { _test_mod.SaveConfig(); 
+            { entity_boost_mod.SaveConfig(); 
                 DXLog.Write("[Test_Mod] 配置已保存");
             };
 
@@ -282,9 +282,7 @@ namespace entity_boost
         private void OnConfigChanged(ModConfig config)
         {
             //对于配置更改后的保存和更改
-            _test_mod.SaveConfig();
-            //老兵恢复满血方法不一定如何实现，暂时不做处理，预留一个位置
-
+            entity_boost_mod.SaveConfig();
             DXLog.Write($"[Test_Mod] 配置已更改");
             
         }
@@ -294,7 +292,7 @@ namespace entity_boost
         {
             Config.OnConfigChanged -= OnConfigChanged;
             
-            _test_mod.SaveConfig();
+            entity_boost_mod.SaveConfig();
         }
 
 
