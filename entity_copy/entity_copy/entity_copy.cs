@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using AX.ModLoader;
 using AX.ModLoader.Config;
 using DXVision;
@@ -242,23 +241,8 @@ namespace entity_copy.entity_copy
                 cloned.Relation = source.Relation;
                 cloned.Team = source.Team;
 
-                // 参考 Train.OnFinish：优先找源单位附近可放置格子。
-                Point nearCell = new Point(source.CellX + 1, source.CellY + 1);
-                Point? spawnCell = DXWorldGrid.GetNearestAvailableCellAroundAreaNearToDestiny(
-                    1,
-                    source.CellArea,
-                    nearCell,
-                    10
-                );
-
-                if (spawnCell != null)
-                {
-                    cloned.Cell = spawnCell.Value;
-                }
-                else
-                {
-                    cloned.Position = source.Position;
-                }
+                // 兼容实现：直接在源单位附近做一个小偏移，避免依赖不存在的网格寻位 API。
+                cloned.Position = DXExtensions_Point.Add(source.Position, 0.8f, 0.8f);
 
                 // 入场 + 注册关卡状态，两者缺一都会导致行为/状态异常。
                 cloned.InvokeAddToScene(null);
