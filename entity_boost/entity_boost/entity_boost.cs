@@ -34,6 +34,7 @@ namespace entity_boost
             Config.OnConfigChanged += (c) => { entity_boost_mod.SaveConfig(); };
         }
 
+        //属性修改的钩子
         [HarmonyPatch(typeof(ZXDefaultParams), "ApplyMods")]
         public class InjectionPatch
         {
@@ -57,6 +58,7 @@ namespace entity_boost
             }
         }
 
+        //老兵满血的钩子
         [HarmonyPatch(typeof(Human), "AddExperience")]
         public class Patch_VeteranHeal
         {
